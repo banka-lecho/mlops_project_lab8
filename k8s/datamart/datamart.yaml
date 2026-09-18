@@ -1,0 +1,82 @@
+# Витрина данных (лабораторная №7): постоянно работающий HTTP-сервис на Scala + Spark.
+# Её под — долгоживущий драйвер Spark: executor'ов он поднимает в кластере по spark-defaults.
+# В базу ходит только витрина: логин и пароль MS SQL есть только у неё (Secret mssql-credentials).
+apiVersion: v1
+kind: Service
+metadata:
+  name: datamart
+  namespace: mlops
+spec:
+  selector: {app: datamart}
+  ports:
+    - {name: http, port: 8090, targetPort: 8090}
+---
+# Deployment, а не Job: витрина не завершается, а всё время ждёт запросов модели.
+# При смене образа Kubernetes сначала поднимает новый под, дожидается его готовности и только потом гасит старый.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: datamart
+  namespace: mlops
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: datamart}
+  template:
+    metadata:
+      labels: {app: datamart}
+    spec:
+      serviceAccountName: spark   # драйвер Spark: права создавать поды executor'ов
+      # Иначе k8s положит в под MSSQL_PORT=tcp://<ip>:1433 для Service mssql, а витрина ждёт там число
+      enableServiceLinks: false
+      containers:
+        - name: datamart
+          image: mlops/datamart:lab7
+          imagePullPolicy: IfNotPresent
+          workingDir: /app/work     # относительные пути конфига (data/, reports/) — на общем томе
+          ports:
+            - {name: http, containerPort: 8090}
+            - {name: spark-ui, containerPort: 4040}
+          env:
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            # Память JVM и адрес драйвера для executor'ов: витрина запускается без spark-submit,
+            # поэтому настройки драйвера передаются системными свойствами JVM
+            - name: JAVA_OPTS
+              value: >-
+                -Xmx1g
+                -Dspark.driver.host=$(POD_IP)
+                -Dspark.kubernetes.driver.pod.name=$(POD_NAME)
+            - {name: DATAMART_CONFIG, value: /etc/datamart/config.json}
+            - {name: SPARK_CONF_DIR, value: /opt/spark/conf}
+            - {name: MSSQL_HOST, value: mssql}
+            - name: MSSQL_USER
+              valueFrom:
+                secretKeyRef: {name: mssql-credentials, key: MSSQL_USER}
+            - name: MSSQL_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: mssql-credentials, key: MSSQL_PASSWORD}
+          resources:
+            requests: {cpu: 500m, memory: 1536Mi}
+            limits: {memory: 2Gi}   # -Xmx1g + память самой JVM вне кучи
+          # Модель обращается к витрине только когда она отвечает на /health
+          readinessProbe:
+            httpGet: {path: /health, port: 8090}
+            periodSeconds: 5
+          startupProbe:             # старт Spark и подключение executor'ов занимают до минуты
+            httpGet: {path: /health, port: 8090}
+            periodSeconds: 5
+            failureThreshold: 36
+          volumeMounts:
+            - {name: config, mountPath: /etc/datamart}
+            - {name: spark-conf, mountPath: /opt/spark/conf}
+            - {name: work, mountPath: /app/work}
+      volumes:
+        - name: config
+          configMap: {name: datamart-config}
+        - name: spark-conf
+          configMap: {name: spark-defaults}
+        - name: work
+          persistentVolumeClaim: {claimName: mlops-work}

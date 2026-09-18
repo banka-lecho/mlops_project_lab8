@@ -1,3 +1,5 @@
+# Лаба 7: предобработку делает витрина (сырой CSV -> очистка -> выборка -> raw.processed_data).
+# Модель в ней больше не участвует, поэтому Job просто вызывает HTTP-эндпоинт витрины.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -5,49 +7,28 @@ metadata:
   namespace: mlops
   labels: {app: model}
 spec:
-  backoffLimit: 0             # упал — не перезапускать, смотрим логи
+  backoffLimit: 0
   template:
     metadata:
       labels: {app: model, command: preprocess}
     spec:
-      serviceAccountName: spark   
-      enableServiceLinks: false
       restartPolicy: Never
       containers:
-        - name: driver
-          image: mlops/model:lab6
+        - name: curl
+          image: curlimages/curl:latest
           imagePullPolicy: IfNotPresent
-          args: ["python", "/app/src/main.py", "preprocess"]
-          env:
-            - name: POD_IP
-              valueFrom: {fieldRef: {fieldPath: status.podIP}}
-            - name: POD_NAME
-              valueFrom: {fieldRef: {fieldPath: metadata.name}}
-            - name: SPARK_MASTER
-              value: k8s://https://kubernetes.default.svc:443
-            - name: PYSPARK_SUBMIT_ARGS
-              value: >-
-                --conf spark.driver.host=$(POD_IP)
-                --conf spark.kubernetes.driver.pod.name=$(POD_NAME)
-                pyspark-shell
-            - {name: MSSQL_HOST, value: mssql}
-            - name: MSSQL_USER
-              valueFrom:
-                secretKeyRef: {name: mssql-credentials, key: MSSQL_USER}
-            - name: MSSQL_PASSWORD
-              valueFrom:
-                secretKeyRef: {name: mssql-credentials, key: MSSQL_PASSWORD}
+          # --fail-with-body: при ответе 4xx/5xx Job падает, а ответ витрины остаётся в логах
+          args:
+            - --silent
+            - --show-error
+            - --fail-with-body
+            - --max-time
+            - "900"
+            - -X
+            - POST
+            - http://datamart:8090/v1/preprocess
+            - -d
+            - "{}"
           resources:
-            requests: {cpu: 500m, memory: 1536Mi}
-            limits: {memory: 2Gi}   
-          volumeMounts:
-            - {name: spark-conf, mountPath: /opt/spark/conf}
-            - {name: config, mountPath: /app/src/config.json, subPath: config.json}
-            - {name: work, mountPath: /app/work}
-      volumes:
-        - name: spark-conf
-          configMap: {name: spark-defaults}
-        - name: config
-          configMap: {name: model-config}
-        - name: work
-          persistentVolumeClaim: {claimName: mlops-work}
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {memory: 64Mi}

@@ -7,7 +7,11 @@ import org.slf4j.LoggerFactory
 
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
+import java.nio.file.{Files, Paths}
+import java.util.Properties
 import java.util.concurrent.{CountDownLatch, Executors}
+import scala.jdk.CollectionConverters._
+import scala.util.Using
 import scala.util.control.NonFatal
 
 import Protocol._
@@ -19,13 +23,14 @@ object DataMartApp {
     val config = MartConfig.load()
     println(s"Источник данных: ${config.datasource}")
 
-    val spark = SparkSession
+    val builder = SparkSession
       .builder()
       .appName(config.spark.appName)
       .master(config.spark.master)
       .config("spark.sql.shuffle.partitions", config.spark.shufflePartitions.toString)
       .config("spark.ui.enabled", "false")
-      .getOrCreate()
+    sparkDefaults().foreach { case (key, value) => builder.config(key, value) }
+    val spark = builder.getOrCreate()
     spark.sparkContext.setLogLevel(config.spark.logLevel)
 
     val server = HttpServer.create(new InetSocketAddress(config.server.host, config.server.port), 0)
@@ -132,6 +137,20 @@ object DataMartApp {
     println(s"Витрина слушает ${config.server.host}:${config.server.port}")
     stopped.await()
   }
+
+  // spark-defaults.conf читает только spark-submit, а витрина — обычное JVM-приложение,
+  // поэтому общие настройки кластера (executor'ы k8s, порты драйвера) подгружаем из SPARK_CONF_DIR сами
+  private def sparkDefaults(): Map[String, String] =
+    sys.env
+      .get("SPARK_CONF_DIR")
+      .map(dir => Paths.get(dir, "spark-defaults.conf"))
+      .filter(path => Files.exists(path))
+      .map { path =>
+        val props = new Properties()
+        Using.resource(Files.newBufferedReader(path, StandardCharsets.UTF_8))(props.load)
+        props.asScala.toMap
+      }
+      .getOrElse(Map.empty)
 
   private def route(server: HttpServer, method: String, path: String)(action: String => Json): Unit =
     server.createContext(

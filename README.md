@@ -17,6 +17,12 @@ cp .env.example .env
 
 ### Через Docker
 
+Образ модели собирается из базового образа Spark, его нужно собрать заранее:
+
+```bash
+docker build -t mlops/spark-py:4.2.0 docker/spark
+```
+
 ```bash
 docker compose up -d mssql mssql-init datamart
 ```

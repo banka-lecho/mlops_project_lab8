@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from dataclasses import dataclass
 
 from pyspark.sql import SparkSession
@@ -36,13 +37,15 @@ def plan_resources(config: SparkConfig) -> SparkResources:
 
 
 def create_spark(config: SparkConfig, resources: SparkResources) -> SparkSession:
-    """SparkSession в local mode под выделенные ресурсы."""
+    """SparkSession: local mode под выделенные ресурсы или кластер k8s, если задан SPARK_MASTER."""
     os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
     shuffle_partitions = resources.cores * config.shuffle_partitions_per_core
+    # В k8s executor'ы — отдельные поды, их настройки приходят из spark-defaults.conf
+    master = os.environ.get("SPARK_MASTER", f"local[{resources.cores}]")
 
     spark = (
         SparkSession.builder.appName(config.app_name)
-        .master(f"local[{resources.cores}]")
+        .master(master)
         .config("spark.driver.memory", f"{resources.driver_memory_gb}g")
         .config("spark.sql.shuffle.partitions", str(shuffle_partitions))
         .getOrCreate()
@@ -50,11 +53,20 @@ def create_spark(config: SparkConfig, resources: SparkResources) -> SparkSession
     spark.sparkContext.setLogLevel(config.log_level)
 
     logger.info(
-        "Spark %s: local[%d], driver memory %dg (машина: %d ядер, %.1f ГБ RAM)",
+        "Spark %s: %s, driver memory %dg (машина: %d ядер, %.1f ГБ RAM)",
         spark.version,
-        resources.cores,
+        master,
         resources.driver_memory_gb,
         resources.machine_cores,
         resources.machine_ram_gb,
     )
     return spark
+
+
+def stop_spark(spark: SparkSession) -> None:
+    """Останавливает сессию. SPARK_UI_HOLD_SEC держит Spark UI открытым для демонстрации."""
+    hold_sec = int(os.environ.get("SPARK_UI_HOLD_SEC", "0"))
+    if hold_sec > 0:
+        logger.info("Spark UI открыт ещё %d с (SPARK_UI_HOLD_SEC)", hold_sec)
+        time.sleep(hold_sec)
+    spark.stop()

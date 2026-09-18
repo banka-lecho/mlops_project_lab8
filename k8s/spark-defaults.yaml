@@ -17,6 +17,9 @@ data:
     spark.kubernetes.executor.request.cores  500m
     spark.kubernetes.executor.limit.cores    1
 
+    # Spark UI на порту 4040 драйвера (витрина в коде его выключает, здесь включаем для k8s)
+    spark.ui.enabled                         true
+
     # Executor'ы подключаются к драйверу по IP его пода на фиксированные порты
     spark.driver.bindAddress                 0.0.0.0
     spark.driver.port                        7078

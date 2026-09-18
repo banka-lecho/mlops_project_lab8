@@ -15,9 +15,9 @@ spec:
       restartPolicy: Never
       containers:
         - name: driver
-          image: mlops/model:lab6
+          image: mlops/model:lab7
           imagePullPolicy: IfNotPresent
-          args: ["python", "/app/src/main.py", "predict"]
+          args: ["predict"]   # ENTRYPOINT образа: python /app/src/main.py
           env:
             - name: POD_IP
               valueFrom: {fieldRef: {fieldPath: status.podIP}}
@@ -30,13 +30,8 @@ spec:
                 --conf spark.driver.host=$(POD_IP)
                 --conf spark.kubernetes.driver.pod.name=$(POD_NAME)
                 pyspark-shell
-            - {name: MSSQL_HOST, value: mssql}
-            - name: MSSQL_USER
-              valueFrom:
-                secretKeyRef: {name: mssql-credentials, key: MSSQL_USER}
-            - name: MSSQL_PASSWORD
-              valueFrom:
-                secretKeyRef: {name: mssql-credentials, key: MSSQL_PASSWORD}
+            # Лаба 7: модель ходит только в витрину, доступа к базе у неё больше нет
+            - {name: DATAMART_URL, value: "http://datamart:8090"}
           resources:
             requests: {cpu: 500m, memory: 1536Mi}
             limits: {memory: 2Gi}   # driver 1g из конфига + память самого Python

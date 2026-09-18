@@ -74,9 +74,8 @@ services:
       DATAMART_URL: http://datamart:8090
     volumes:
       - ./src:/app/src
-      - ./data:/app/data
-      - ./models:/app/models
-      - ./reports:/app/reports
+      - ./data:/app/work/data
+      - ./models:/app/work/models
     depends_on:
       datamart:
         condition: service_healthy

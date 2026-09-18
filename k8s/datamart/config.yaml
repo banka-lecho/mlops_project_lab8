@@ -1,0 +1,44 @@
+# Конфиг витрины для кластера. Витрина читает его по пути из DATAMART_CONFIG вместо config.json из образа.
+# Отличия от datamart/src/main/resources/config.json:
+#   spark.master = k8s://...  — executor'ы витрины — поды в кластере (их число и размер — в spark-defaults)
+#   shuffle_partitions = 4    — по 2 на каждого из 2 executor'ов
+#   raw_path                  — первые 100 тыс. строк CSV на общем томе, как у модели на шагах 2–3
+#   datasource.host = mssql   — имя Service базы (MSSQL_HOST из Deployment важнее)
+# Логин и пароль базы в конфиге не хранятся: витрина берёт их только из Secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: datamart-config
+  namespace: mlops
+data:
+  config.json: |
+    {
+      "server": {"host": "0.0.0.0", "port": 8090, "threads": 4},
+      "spark": {
+        "app_name": "openfoodfacts-datamart",
+        "master": "k8s://https://kubernetes.default.svc:443",
+        "shuffle_partitions": 4,
+        "log_level": "WARN"
+      },
+      "data": {
+        "raw_path": "data/raw/products_100k.csv",
+        "interim_path": "data/interim/products.parquet",
+        "report_path": "reports/preprocess_report.json"
+      },
+      "sampling": {
+        "seed": 42,
+        "rows_per_core": 50000,
+        "copies_in_memory": 3,
+        "memory_overhead": 4,
+        "max_rows": 500000
+      },
+      "datasource": {
+        "host": "mssql",
+        "port": 1433,
+        "database": "OpenFoodDB",
+        "raw_schema": "raw",
+        "ml_schema": "ml",
+        "fetch_size": 10000,
+        "batch_size": 10000
+      }
+    }

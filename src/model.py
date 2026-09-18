@@ -3,7 +3,7 @@ from pyspark.ml.evaluation import ClusteringEvaluator
 from pyspark.ml.feature import StandardScaler, StandardScalerModel, VectorAssembler
 
 from logger import get_logger
-from spark_session import create_spark, plan_resources
+from spark_session import create_spark, plan_resources, stop_spark
 from datamart_client import DataMartClient
 from utils import load_config
 
@@ -103,7 +103,7 @@ class ModelKMEANS:
             mart.finish_run(run_id, "FAILED", error_message=repr(exc))
             raise
         finally:
-            spark.stop()
+            stop_spark(spark)
 
     def predict(self, predictions_path, train_run_id=None, df=None):
         """Применяет модель запуска обучения (по умолчанию последнего успешного) к данным из БД."""
@@ -149,4 +149,4 @@ class ModelKMEANS:
             mart.finish_run(run_id, "FAILED", error_message=repr(exc))
             raise
         finally:
-            spark.stop()
+            stop_spark(spark)

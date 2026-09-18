@@ -1,27 +1,12 @@
-FROM python:3.12-slim-bookworm
+# Сервис модели (версия лабораторной №7): PySpark KMeans, данные — только через витрину.
+# Spark, Java и Python — из базового образа docker/spark, тех же версий, что у executor'ов в k8s.
+FROM mlops/spark-py:4.2.0
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    JAVA_HOME=/usr/lib/jvm/default-java
+COPY --chown=app:app src /app/src
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    default-jre-headless \
-    procps \
-    && rm -rf /var/lib/apt/lists/*
+# Относительные пути конфига (models/, data/) — внутри рабочего каталога (в k8s — общий том)
+WORKDIR /app/work
 
-RUN useradd --create-home app
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-RUN mkdir -p data models reports logs && chown -R app:app /app
-
-USER app
-
-COPY --chown=app:app src ./src
-
-ENTRYPOINT ["python", "src/main.py"]
+# Команда модели передаётся аргументом: train | predict (как в docker compose run app train)
+ENTRYPOINT ["/usr/bin/tini", "--", "/opt/entrypoint.sh", "python", "/app/src/main.py"]
 CMD ["train"]

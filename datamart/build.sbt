@@ -10,6 +10,7 @@ lazy val root = (project in file("."))
     name := "datamart",
     libraryDependencies ++= Seq(
       "org.apache.spark" %% "spark-sql" % sparkVersion,
+      "org.apache.spark" %% "spark-kubernetes" % sparkVersion, // master k8s://: executor'ы — поды в кластере
       "com.microsoft.sqlserver" % "mssql-jdbc" % "12.8.1.jre11",
       "io.circe" %% "circe-core" % circeVersion,
       "io.circe" %% "circe-generic" % circeVersion,

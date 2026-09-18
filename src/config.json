@@ -1,0 +1,23 @@
+{
+  "spark": {
+    "app_name": "openfoodfacts-kmeans",
+    "ram_fraction": 0.4,
+    "driver_memory_min_gb": 2,
+    "driver_memory_max_gb": 16,
+    "cores": 0,
+    "shuffle_partitions_per_core": 2,
+    "log_level": "WARN"
+  },
+  "model": {
+    "model_path": "models/kmeans",
+    "scaler_path": "models/scaler",
+    "predictions_path": "data/processed/predictions.parquet",
+    "k_min": 2,
+    "k_max": 10
+  },
+  "datamart": {
+    "url": "http://localhost:8090",
+    "timeout_sec": 900,
+    "startup_retries": 60
+  }
+}

@@ -1,0 +1,23 @@
+FROM sbtscala/scala-sbt:eclipse-temurin-17.0.20_8_1.13.0_2.13.18 AS builder
+
+WORKDIR /build
+
+# Сначала только описание сборки — зависимости кешируются отдельным слоем
+COPY datamart/build.sbt ./
+COPY datamart/project ./project
+RUN sbt update
+
+COPY datamart/src ./src
+RUN sbt stage
+
+
+FROM eclipse-temurin:17-jre-jammy
+
+RUN useradd --create-home datamart
+WORKDIR /opt/datamart
+COPY --from=builder /build/target/universal/stage ./
+RUN chown -R datamart:datamart /opt/datamart
+USER datamart
+
+EXPOSE 8090
+ENTRYPOINT ["/opt/datamart/bin/datamart"]

@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spark-smoke-test
+  namespace: mlops
+data:
+  smoke_test.py: |
+    import os
+    import socket
+
+    from pyspark.sql import SparkSession
+
+    spark = (
+        SparkSession.builder.appName("spark-smoke-test")
+        .master(os.environ["SPARK_MASTER"])
+        .getOrCreate()
+    )
+    sc = spark.sparkContext
+
+    hosts = sc.parallelize(range(100), 8).map(lambda _: socket.gethostname()).distinct().collect()
+    print(f"Задачи выполнили {len(hosts)} executor'а: {sorted(hosts)}")
+
+    total = spark.range(0, 10_000_000, numPartitions=8).selectExpr("sum(id) AS s").first()["s"]
+    print(f"sum(0..10M) = {total}")
+
+    path = "data/smoke_test.parquet"
+    spark.range(100_000).write.mode("overwrite").parquet(path)
+    print(f"Прочитано с общего тома {path}: {spark.read.parquet(path).count()} строк")
+
+    spark.stop()
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spark-smoke-test
+  namespace: mlops
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: spark-smoke-test
+    spec:
+      serviceAccountName: spark
+      restartPolicy: Never
+      containers:
+        - name: driver
+          image: mlops/spark-py:4.2.0
+          imagePullPolicy: IfNotPresent
+          workingDir: /app/work
+          args: ["python", "/opt/smoke/smoke_test.py"]
+          env:
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: SPARK_MASTER
+              value: k8s://https://kubernetes.default.svc:443
+            # Executor'ы ходят к драйверу по IP пода; под драйвера — владелец executor'ов
+            - name: PYSPARK_SUBMIT_ARGS
+              value: >-
+                --conf spark.driver.host=$(POD_IP)
+                --conf spark.kubernetes.driver.pod.name=$(POD_NAME)
+                pyspark-shell
+          resources:
+            requests: {cpu: 250m, memory: 1Gi}
+            limits: {memory: 1536Mi}
+          volumeMounts:
+            - {name: spark-conf, mountPath: /opt/spark/conf}
+            - {name: script, mountPath: /opt/smoke}
+            - {name: work, mountPath: /app/work}
+      volumes:
+        - name: spark-conf
+          configMap: {name: spark-defaults}
+        - name: script
+          configMap: {name: spark-smoke-test}
+        - name: work
+          persistentVolumeClaim: {claimName: mlops-work}

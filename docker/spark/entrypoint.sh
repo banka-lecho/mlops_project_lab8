@@ -1,14 +1,10 @@
 #!/bin/bash
-# Точка входа образа Spark.
-#   executor  — под executor'а: его создаёт драйвер Spark через API Kubernetes;
-#   иначе     — выполняется переданная команда (драйвер: python ... / bin/datamart).
 set -eo pipefail
 
 if [ "$1" != "executor" ]; then
   exec "$@"
 fi
 
-# Драйвер передаёт JVM-опции executor'а переменными SPARK_JAVA_OPT_0, SPARK_JAVA_OPT_1, ...
 mapfile -t java_opts < <(env | grep '^SPARK_JAVA_OPT_' | sort -t_ -k4 -n | sed 's/^[^=]*=//')
 
 exec "${JAVA_HOME}/bin/java" \

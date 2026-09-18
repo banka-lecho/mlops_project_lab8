@@ -1,6 +1,3 @@
-# Базовый образ Spark для Kubernetes: Python 3.12 + Java 17 + PySpark.
-# Из него запускаются executor'ы всех Spark-приложений и на нём же собираются образы модели.
-# Драйвер и executor'ы должны иметь одинаковые версии Spark и Python, поэтому образ общий.
 FROM python:3.12-slim-bookworm
 
 ARG SPARK_VERSION=4.2.0
@@ -21,7 +18,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN pip install pyspark==${SPARK_VERSION} numpy==2.5.3
 
-# JDBC-драйвер MS SQL сразу в jars/: executor'ам он нужен для чтения/записи базы
 ADD --chmod=644 https://repo1.maven.org/maven2/com/microsoft/sqlserver/mssql-jdbc/${MSSQL_JDBC_VERSION}/mssql-jdbc-${MSSQL_JDBC_VERSION}.jar \
     ${SPARK_HOME}/jars/
 

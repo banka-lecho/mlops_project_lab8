@@ -1,11 +1,36 @@
-# Lab 7: витрина данных на Scala между моделью и MS SQL Server
+# Lab 8: модель, витрина и источник данных в Kubernetes
 
 Кластеризация продуктов Open Food Facts по пищевой ценности (на 100г) с помощью Spark ML KMeans.
 Модель не обращается к базе напрямую: между ними стоит витрина данных на Scala
 ([`datamart/`](datamart)). Витрина готовит данные (чтение сырого CSV, очистка, выборка),
 хранит их в MS SQL Server и общается с моделью по HTTP в едином JSON-формате.
 
-## Установка
+Все три сервиса перенесены в Kubernetes, вычисления Spark распределены: драйвер модели и драйвер витрины
+сами просят у Kubernetes поды executor'ов (2 реплики), а после работы удаляют их.
+
+## Как устроено в кластере
+
+Все объекты лежат в namespace `mlops`.
+
+| Сервис | Объекты | Манифест |
+|---|---|---|
+| Инфраструктура Spark | ServiceAccount `spark` с правами на поды, общий диск `mlops-work` (папка `storage/` проекта), ConfigMap `spark-defaults` — число и размер executor'ов | [`k8s/spark-rbac.yaml`](k8s/spark-rbac.yaml), [`k8s/storage.yaml`](k8s/storage.yaml), [`k8s/spark-defaults.yaml`](k8s/spark-defaults.yaml) |
+| Источник данных MS SQL | StatefulSet `mssql` со своим диском, Service `mssql:1433`, Job `mssql-init` (таблицы), Secret `mssql-credentials` | [`k8s/mssql/`](k8s/mssql) |
+| Витрина данных | Deployment `datamart` — постоянно работающий драйвер Spark с динамическим выделением executor'ов (0–2), Service `datamart:8090` | [`k8s/datamart/datamart.yaml`](k8s/datamart/datamart.yaml) |
+| Модель | Job'ы `model-preprocess` (вызов витрины), `model-train`, `model-predict` | [`k8s/model/`](k8s/model) |
+| Проверка инфраструктуры | Job `spark-smoke-test`: 2 executor'а, вычисление, запись на общий диск | [`k8s/spark-smoke-test.yaml`](k8s/spark-smoke-test.yaml) |
+
+Образы:
+
+| Образ | Из чего | Кто запускается |
+|---|---|---|
+| `mlops/spark-py:4.2.0` | [`docker/spark/Dockerfile`](docker/spark/Dockerfile) | executor'ы всех приложений; основа образа модели |
+| `mlops/model:lab7` | [`Dockerfile`](Dockerfile) | драйвер модели |
+| `mlops/datamart:lab7` | [`Dockerfile.datamart`](Dockerfile.datamart) | витрина |
+
+Пароли базы есть только у самой базы, у `mssql-init` и у витрины: у Job'ов модели нет доступа к Secret.
+
+## Подготовка
 
 Секреты для базы — в `.env` в корне проекта:
 
@@ -13,17 +38,154 @@
 cp .env.example .env
 ```
 
-Положите сырой датасет в `data/en.openfoodfacts.org.products.csv`
+Положите сырой датасет в `data/en.openfoodfacts.org.products.csv`.
 
-### Через Docker
+## Запуск в Kubernetes
+
+Нужны Kubernetes (проверялось на Docker Desktop, способ развёртывания kubeadm, ~12 ГБ памяти) и `kubectl`.
+В [`k8s/storage.yaml`](k8s/storage.yaml) указан абсолютный путь к папке `storage/` проекта — на другом компьютере его нужно поменять.
+
+### 0. Чистый лист (если что-то уже развёрнуто)
+
+```bash
+kubectl delete namespace mlops
+kubectl delete pv mlops-work
+docker compose down -v
+rm -rf storage
+```
+
+Не удаляйте контейнеры командой `docker rm -f $(docker ps -aq)`: в Docker Desktop в том же Docker работают
+системные контейнеры самого Kubernetes (`k8s_…`). Полный сброс кластера — Docker Desktop → Settings → Kubernetes → Reset Kubernetes Cluster.
+
+### 1. Инфраструктура Spark
+
+```bash
+docker build -t mlops/spark-py:4.2.0 docker/spark
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/spark-rbac.yaml -f k8s/storage.yaml -f k8s/spark-defaults.yaml
+kubectl -n mlops get pvc
+```
+
+Проверка: драйвер поднимает 2 executor'а, считает сумму 0..10M и пишет/читает parquet на общем диске.
+Во втором терминале удобно смотреть, как появляются поды: `kubectl -n mlops get pods -w`.
+
+```bash
+kubectl apply -f k8s/spark-smoke-test.yaml && kubectl -n mlops wait --for=condition=complete job/spark-smoke-test --timeout=300s
+kubectl -n mlops logs job/spark-smoke-test
+```
+
+Ожидается: `Задачи выполнили 2 executor'а`, `sum(0..10M) = 49999995000000`, `100000 строк`.
+
+### 2. Данные для кластера
+
+Для проверки в кластере берутся первые 100 тыс. строк CSV, они кладутся на общий диск:
+
+```bash
+mkdir -p storage/data/raw
+head -n 100001 data/en.openfoodfacts.org.products.csv > storage/data/raw/products_100k.csv
+```
+
+### 3. Источник данных MS SQL
+
+Пароли из `.env` попадают в k8s Secret, схема — в ConfigMap из того же `schema.sql`, что использует docker compose:
+
+```bash
+kubectl -n mlops create secret generic mssql-credentials --from-env-file=.env
+kubectl -n mlops create configmap mssql-schema --from-file=docker/mssql/init/schema.sql
+kubectl apply -f k8s/mssql/mssql.yaml && kubectl -n mlops rollout status statefulset/mssql --timeout=400s
+kubectl apply -f k8s/mssql/job-init.yaml && kubectl -n mlops wait --for=condition=complete job/mssql-init --timeout=300s
+kubectl -n mlops logs job/mssql-init
+```
+
+Ожидается `Схема применена`.
+
+### 4. Витрина и модель
+
+```bash
+docker build -t mlops/datamart:lab7 -f Dockerfile.datamart .
+docker build -t mlops/model:lab7 .
+kubectl apply -f k8s/datamart/datamart.yaml && kubectl -n mlops rollout status deployment/datamart --timeout=300s
+```
+
+Модель запускается строго по очереди — каждый шаг берёт результат предыдущего:
+
+```bash
+kubectl apply -f k8s/model/job-preprocess.yaml && kubectl -n mlops wait --for=condition=complete job/model-preprocess --timeout=600s
+kubectl apply -f k8s/model/job-train.yaml && kubectl -n mlops wait --for=condition=complete job/model-train --timeout=900s
+kubectl apply -f k8s/model/job-predict.yaml && kubectl -n mlops wait --for=condition=complete job/model-predict --timeout=600s
+```
+
+Если Job упал, `kubectl wait` этого не заметит и будет ждать до таймаута — проверяйте `kubectl -n mlops get jobs`.
+Job нельзя перезапустить с тем же именем: перед повтором `kubectl -n mlops delete job <имя>`.
+
+Результаты — в логах и в базе, модели и предсказания — в `storage/models` и `storage/data/processed`:
+
+```bash
+kubectl -n mlops logs job/model-train | grep -E "INFO|Silhouette"
+kubectl -n mlops exec mssql-0 -- bash -c '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -d OpenFoodDB -W -Q "SELECT run_id, command, status, rows_in, best_k, best_silhouette FROM ml.model_runs"'
+```
+
+### 5. Утилизация ресурсов
+
+Ресурсы подобраны по замерам `kubectl top` (нужен metrics-server, см. [инструменты](#инструменты-для-демонстрации-в-kubernetes)):
+
+| Под | Резерв (requests) | Лимит | Пик при работе |
+|---|---|---|---|
+| `datamart` | 250m CPU, 1 ГБ | 1,5 ГБ | 476m, 760 МБ |
+| драйвер модели | 500m CPU, 1 ГБ | 1,5 ГБ | 880m, 800 МБ |
+| executor | 500m CPU, 896 МБ | 1 CPU, 896 МБ | 590m, 550–680 МБ |
+| `mssql-0` | 250m CPU, 1,5 ГБ | 2 ГБ (минимум для MS SQL) | 60m, ~1,1–1,4 ГБ |
+
+- Витрина держит executor'ов только пока считает: после 60 с простоя они удаляются (динамическое выделение).
+  В простое в `mlops` работают только `datamart` и `mssql-0`: резерв 500m CPU и 2,5 ГБ вместо 2000m и 6,4 ГБ.
+- Модель сама определяет память драйвера по лимиту пода (`/sys/fs/cgroup/memory.max`), а не по памяти всей ноды.
+- `maxExecutors` витрины в [`datamart.yaml`](k8s/datamart/datamart.yaml) должен быть не меньше `spark.executor.instances`
+  в [`spark-defaults.yaml`](k8s/spark-defaults.yaml): Spark стартует с `instances` executor'ов, иначе витрина не запустится.
+
+```bash
+kubectl top pods -n mlops
+kubectl describe node docker-desktop | grep -A 8 "Allocated resources"
+```
+
+### Демонстрации
+
+Обновление витрины без остановки: новый под поднимается и становится готовым раньше, чем гасится старый
+(во втором терминале `kubectl -n mlops get pods -w`):
+
+```bash
+kubectl -n mlops rollout restart deployment/datamart
+```
+
+Самовосстановление: Kubernetes сам пересоздаёт под базы, данные остаются на её диске:
+
+```bash
+kubectl -n mlops delete pod mssql-0
+```
+
+Spark UI обучения: `SPARK_UI_HOLD_SEC` держит драйвер открытым после обучения. Порт пробрасывается, когда Spark стартовал:
+
+```bash
+kubectl -n mlops delete job model-train --ignore-not-found
+sed 's/value: "0"/value: "300"/' k8s/model/job-train.yaml | kubectl apply -f -
+until kubectl -n mlops logs job/model-train 2>/dev/null | grep -q "Spark 4.2.0"; do sleep 1; done
+kubectl -n mlops port-forward $(kubectl -n mlops get pod -l job-name=model-train -o name) 4040:4040
+```
+
+Затем http://localhost:4040/executors/. Spark UI витрины доступен всё время:
+`kubectl -n mlops port-forward deploy/datamart 4041:4040` → http://localhost:4041.
+
+Общий обзор развёрнутого:
+
+```bash
+kubectl -n mlops get all,pvc,configmap,secret,sa
+```
+
+## Запуск без Kubernetes (docker compose, как в лабораторной №7)
 
 Образ модели собирается из базового образа Spark, его нужно собрать заранее:
 
 ```bash
 docker build -t mlops/spark-py:4.2.0 docker/spark
-```
-
-```bash
 docker compose up -d mssql mssql-init datamart
 ```
 
@@ -34,6 +196,17 @@ curl localhost:8090/health
 ```
 
 `mssql-init` прогоняет [`docker/mssql/init/schema.sql`](docker/mssql/init/schema.sql). Данные базы лежат в volume `mssql-data` и переживают `docker compose down`.
+
+```bash
+# Предобработка на стороне витрины
+curl -X POST localhost:8090/v1/preprocess -d '{}'
+
+# Обучение: подбор k по silhouette, модель на диск, предсказания и метрики через витрину
+docker compose run --rm app train
+
+# Инференс последней успешной модели
+docker compose run --rm app predict --output data/processed/predictions.parquet
+```
 
 ### Локально
 
@@ -48,35 +221,30 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 set -a; source .env; set +a
+python src/main.py train
 ```
 
 ## Конфигурация
 
-Все настройки — в [`src/config.json`](src/config.json): пути к данным/артефактам (`data`), какие колонки брать (`features`),
-параметры модели (`model`, включая диапазон `k`), адрес витрины (`datamart`).
-Ресурсы машины (ядра, RAM) не задаются вручную — определяются в рантайме (`src/spark_session.py`), конфиг лишь ограничивает,
-сколько от них брать. Адрес витрины переопределяется переменной `DATAMART_URL`.
+Настройки модели — в [`src/config.json`](src/config.json): Spark (`spark`), параметры модели (`model`, включая диапазон `k`),
+адрес витрины (`datamart`). Ресурсы (ядра, RAM) не задаются вручную — определяются в рантайме (`src/spark_session.py`),
+в контейнере с лимитом памяти — по этому лимиту; конфиг лишь ограничивает, сколько от них брать.
 
 Настройки витрины — в [`datamart/src/main/resources/config.json`](datamart/src/main/resources/config.json):
 HTTP-сервер (`server`), Spark (`spark`), пути к данным (`data`), размер выборки (`sampling`), подключение к базе (`datasource`).
-Переменные окружения важнее конфига: `MSSQL_HOST` / `MSSQL_PORT` переопределяют `datasource.host` / `datasource.port`,
-`MSSQL_USER` / `MSSQL_PASSWORD` обязательны и берутся только из окружения. Память витрины задаётся через `JAVA_OPTS`
-(по умолчанию `-Xmx2g`, для предобработки полного CSV: `DATAMART_JAVA_OPTS=-Xmx4g docker compose up -d datamart`).
+Память витрины задаётся через `JAVA_OPTS` (в compose по умолчанию `-Xmx2g`, для предобработки полного CSV:
+`DATAMART_JAVA_OPTS=-Xmx4g docker compose up -d datamart`).
 
-## Запуск
+Переменные окружения важнее конфигов — через них кластер меняет только то, что отличается от локального запуска:
 
-```bash
-# Предобработка на стороне витрины
-curl -X POST localhost:8090/v1/preprocess -d '{}'
-
-# Обучение: подбор k по silhouette, модель на диск, предсказания и метрики через витрину
-docker compose run --rm app train
-
-# Инференс последней успешной модели
-docker compose run --rm app predict --output data/processed/predictions.parquet
-```
-
-Локально те же команды модели: `python src/main.py train|predict`.
+| Переменная | Кому | Что задаёт |
+|---|---|---|
+| `SPARK_MASTER` | модель, витрина | `k8s://…` — executor'ы в кластере; без неё Spark работает локально (`local[...]`) |
+| `DATAMART_URL` | модель | адрес витрины (`http://datamart:8090` в кластере) |
+| `MSSQL_HOST`, `MSSQL_PORT` | витрина | адрес базы |
+| `MSSQL_USER`, `MSSQL_PASSWORD` | витрина | логин и пароль, только из окружения (в кластере — из Secret) |
+| `SPARK_CONF_DIR` | витрина | папка с `spark-defaults.conf`: витрина запускается без `spark-submit` и читает его сама |
+| `SPARK_UI_HOLD_SEC` | модель | сколько секунд держать Spark UI после обучения (для показа) |
 
 ## Протокол взаимодействия: модель — витрина — источник данных
 
@@ -124,7 +292,7 @@ docker compose run --rm app predict --output data/processed/predictions.parquet
 
 ### Предобработка (`/v1/preprocess`)
 
-Выполняется целиком на стороне витрины.Статистика по шагам возвращается в ответе и пишется в `reports/preprocess_report.json`.
+Выполняется целиком на стороне витрины. Статистика по шагам возвращается в ответе и пишется в `reports/preprocess_report.json`.
 
 ### Обучение (`train`)
 

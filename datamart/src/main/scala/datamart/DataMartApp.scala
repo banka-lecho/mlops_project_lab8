@@ -138,8 +138,6 @@ object DataMartApp {
     stopped.await()
   }
 
-  // spark-defaults.conf читает только spark-submit, а витрина — обычное JVM-приложение,
-  // поэтому общие настройки кластера (executor'ы k8s, порты драйвера) подгружаем из SPARK_CONF_DIR сами
   private def sparkDefaults(): Map[String, String] =
     sys.env
       .get("SPARK_CONF_DIR")

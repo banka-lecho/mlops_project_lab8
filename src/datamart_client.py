@@ -115,9 +115,9 @@ class DataMartClient:
             try:
                 with urlopen(request, timeout=self.timeout_sec) as response:
                     return self._unpack(json.loads(response.read().decode("utf-8")))
-            except HTTPError as error:  # витрина ответила ошибкой — тело тоже в формате протокола
+            except HTTPError as error:   
                 self._unpack(json.loads(error.read().decode("utf-8")))
-            except URLError as error:  # витрина ещё не поднялась
+            except URLError as error:  
                 last_error = error
                 if attempt == 0:
                     logger.info("Жду витрину на %s", self.base_url)

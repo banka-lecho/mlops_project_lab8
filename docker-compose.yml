@@ -44,7 +44,6 @@ services:
     container_name: openfoodfacts-datamart
     working_dir: /app
     environment:
-      # для предобработки 13 ГБ CSV можно поднять: DATAMART_JAVA_OPTS=-Xmx4g docker compose up -d datamart
       JAVA_OPTS: ${DATAMART_JAVA_OPTS:--Xmx2g}
       MSSQL_HOST: mssql
       MSSQL_USER: ${MSSQL_USER:?задайте MSSQL_USER в .env}

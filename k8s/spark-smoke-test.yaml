@@ -56,7 +56,6 @@ spec:
               valueFrom: {fieldRef: {fieldPath: metadata.name}}
             - name: SPARK_MASTER
               value: k8s://https://kubernetes.default.svc:443
-            # Executor'ы ходят к драйверу по IP пода; под драйвера — владелец executor'ов
             - name: PYSPARK_SUBMIT_ARGS
               value: >-
                 --conf spark.driver.host=$(POD_IP)

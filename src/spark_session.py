@@ -11,7 +11,6 @@ from utils import SparkConfig
 
 logger = get_logger(__name__)
 
-# Лимит памяти контейнера (cgroup v2). В поде k8s это limits.memory, а sysconf видит RAM всей ноды
 CGROUP_MEMORY_LIMIT = Path("/sys/fs/cgroup/memory.max")
 
 @dataclass(frozen=True)
@@ -56,7 +55,6 @@ def create_spark(config: SparkConfig, resources: SparkResources) -> SparkSession
     """SparkSession: local mode под выделенные ресурсы или кластер k8s, если задан SPARK_MASTER."""
     os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
     shuffle_partitions = resources.cores * config.shuffle_partitions_per_core
-    # В k8s executor'ы — отдельные поды, их настройки приходят из spark-defaults.conf
     master = os.environ.get("SPARK_MASTER", f"local[{resources.cores}]")
 
     spark = (

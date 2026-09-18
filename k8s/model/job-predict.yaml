@@ -10,14 +10,14 @@ spec:
     metadata:
       labels: {app: model, command: predict}
     spec:
-      serviceAccountName: spark   # права создавать поды executor'ов
+      serviceAccountName: spark   
       enableServiceLinks: false
       restartPolicy: Never
       containers:
         - name: driver
           image: mlops/model:lab7
           imagePullPolicy: IfNotPresent
-          args: ["predict"]   # ENTRYPOINT образа: python /app/src/main.py
+          args: ["predict"]   
           env:
             - name: POD_IP
               valueFrom: {fieldRef: {fieldPath: status.podIP}}
@@ -30,11 +30,10 @@ spec:
                 --conf spark.driver.host=$(POD_IP)
                 --conf spark.kubernetes.driver.pod.name=$(POD_NAME)
                 pyspark-shell
-            # Лаба 7: модель ходит только в витрину, доступа к базе у неё больше нет
             - {name: DATAMART_URL, value: "http://datamart:8090"}
           resources:
-            requests: {cpu: 500m, memory: 1Gi}   # пик драйвера: train 804Mi, predict 365Mi
-            limits: {memory: 1536Mi}   # модель видит этот лимит и берёт драйверу 1g (40% лимита, но не меньше 1 ГБ)
+            requests: {cpu: 500m, memory: 1Gi}   
+            limits: {memory: 1536Mi}   
           volumeMounts:
             - {name: spark-conf, mountPath: /opt/spark/conf}
             - {name: work, mountPath: /app/work}

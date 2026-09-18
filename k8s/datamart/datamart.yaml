@@ -1,6 +1,3 @@
-# Витрина данных (лабораторная №7): постоянно работающий HTTP-сервис на Scala + Spark.
-# Её под — долгоживущий драйвер Spark: executor'ов он поднимает в кластере по spark-defaults.
-# В базу ходит только витрина: логин и пароль MS SQL есть только у неё (Secret mssql-credentials).
 apiVersion: v1
 kind: Service
 metadata:
@@ -11,8 +8,6 @@ spec:
   ports:
     - {name: http, port: 8090, targetPort: 8090}
 ---
-# Deployment, а не Job: витрина не завершается, а всё время ждёт запросов модели.
-# При смене образа Kubernetes сначала поднимает новый под, дожидается его готовности и только потом гасит старый.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -26,14 +21,13 @@ spec:
     metadata:
       labels: {app: datamart}
     spec:
-      serviceAccountName: spark   # драйвер Spark: права создавать поды executor'ов
-      # Иначе k8s положит в под MSSQL_PORT=tcp://<ip>:1433 для Service mssql, а витрина ждёт там число
+      serviceAccountName: spark   
       enableServiceLinks: false
       containers:
         - name: datamart
           image: mlops/datamart:lab7
           imagePullPolicy: IfNotPresent
-          workingDir: /app/work     # относительные пути конфига (data/, reports/) — на общем томе
+          workingDir: /app/work     
           ports:
             - {name: http, containerPort: 8090}
             - {name: spark-ui, containerPort: 4040}
@@ -42,12 +36,6 @@ spec:
               valueFrom: {fieldRef: {fieldPath: status.podIP}}
             - name: POD_NAME
               valueFrom: {fieldRef: {fieldPath: metadata.name}}
-            # Память JVM и адрес драйвера для executor'ов: витрина запускается без spark-submit,
-            # поэтому настройки драйвера передаются системными свойствами JVM.
-            # Динамическое выделение: витрина работает постоянно, но считает редко — executor'ы
-            # поднимаются под запрос (до 2) и удаляются после минуты простоя, а не держат память круглосуточно.
-            # cachedExecutorIdleTimeout — предобработка кэширует данные и не освобождает кэш,
-            # без таймаута такие executor'ы не отпускались бы никогда.
             - name: JAVA_OPTS
               value: >-
                 -Xmx1g
@@ -71,13 +59,12 @@ spec:
               valueFrom:
                 secretKeyRef: {name: mssql-credentials, key: MSSQL_PASSWORD}
           resources:
-            requests: {cpu: 250m, memory: 1Gi}   # пик 476m CPU / 759Mi памяти, в простое ~6m / 370Mi
-            limits: {memory: 1536Mi}             # -Xmx1g + память самой JVM вне кучи
-          # Модель обращается к витрине только когда она отвечает на /health
+            requests: {cpu: 250m, memory: 1Gi}   
+            limits: {memory: 1536Mi}             
           readinessProbe:
             httpGet: {path: /health, port: 8090}
             periodSeconds: 5
-          startupProbe:             # старт Spark и подключение executor'ов занимают до минуты
+          startupProbe:            
             httpGet: {path: /health, port: 8090}
             periodSeconds: 5
             failureThreshold: 36

@@ -17,7 +17,6 @@ spec:
           command: ["/bin/bash", "-c"]
           args:
             - |
-              # Ждём, пока сервер начнёт принимать логины, затем прогоняем схему
               until /opt/mssql-tools18/bin/sqlcmd -S mssql -U sa -P "$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" > /dev/null; do
                 echo "Жду MS SQL..."; sleep 5
               done

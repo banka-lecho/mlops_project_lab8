@@ -2,7 +2,6 @@ FROM sbtscala/scala-sbt:eclipse-temurin-17.0.20_8_1.13.0_2.13.18 AS builder
 
 WORKDIR /build
 
-# Сначала только описание сборки — зависимости кешируются отдельным слоем
 COPY datamart/build.sbt ./
 COPY datamart/project ./project
 RUN sbt update

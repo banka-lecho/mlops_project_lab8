@@ -1,26 +1,31 @@
+# PersistentVolume(PC): сам диск с его описание: сколько хранить, какие права и какое расположение
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: mlops-work
+  name: mlops-work                      # namespace нет: PV — объект всего кластера, а не папки mlops
 spec:
   capacity:
-    storage: 20Gi
-  accessModes: ["ReadWriteMany"]
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: ""
-  hostPath:
+    storage: 20Gi                       # объявленный размер (для hostPath это просто метка, не лимит)
+  accessModes: ["ReadWriteMany"]        # писать могут многие поды одновременно (драйвер + executor'ы)
+  persistentVolumeReclaimPolicy: Retain # удалили PVC → данные НЕ стираются
+  storageClassName: ""                  # «диск ручной работы», не из автоматического класса
+  hostPath:                             # тип диска: папка на самой ноде
     path: /Users/shpileva/Desktop/big_data/mlops_project_lab8/storage
-    type: DirectoryOrCreate
+    type: DirectoryOrCreate             # если папки нет, создать
 ---
+# Описание заявки на диск (PVC)
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: mlops-work
-  namespace: mlops
+  namespace: mlops                       # а вот заявка живёт в namespace: её используют поды из mlops
 spec:
-  accessModes: ["ReadWriteMany"]
-  storageClassName: ""
-  volumeName: mlops-work
+  accessModes: ["ReadWriteMany"]         # требования должны совпадать с PV, иначе связки не будет
+  storageClassName: ""                   # "" = не создавай диск автоматически, возьми готовый
+  volumeName: mlops-work                 # и возьми именно вот этот PV
   resources:
     requests:
-      storage: 20Gi
+      storage: 20Gi                      # сколько места прошу (не больше capacity у PV)
+      
+# Зачем такое разделение? Под не должен знать, где физически лежат данные. Сегодня это папка на Mac,
+# в облаке будет сетевой диск. Поменяется только PV, а манифесты подов, Job'ов и витрины останутся прежними.

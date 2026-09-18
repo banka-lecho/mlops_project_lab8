@@ -2,6 +2,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from pyspark.sql import SparkSession
 
@@ -9,6 +10,9 @@ from logger import get_logger
 from utils import SparkConfig
 
 logger = get_logger(__name__)
+
+# Лимит памяти контейнера (cgroup v2). В поде k8s это limits.memory, а sysconf видит RAM всей ноды
+CGROUP_MEMORY_LIMIT = Path("/sys/fs/cgroup/memory.max")
 
 @dataclass(frozen=True)
 class SparkResources:
@@ -18,9 +22,21 @@ class SparkResources:
     driver_memory_gb: int
 
 
+def memory_limit_gb() -> float | None:
+    """Лимит памяти контейнера в ГБ или None, если его нет (ноутбук, контейнер без лимита)."""
+    try:
+        value = CGROUP_MEMORY_LIMIT.read_text().strip()
+    except OSError:
+        return None
+    return None if value == "max" else int(value) / 2**30
+
+
 def plan_resources(config: SparkConfig) -> SparkResources:
-    """Определяет ядра и память машины и решает, сколько отдать Spark."""
+    """Определяет ядра и доступную память и решает, сколько отдать Spark."""
     ram_gb = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30
+    limit_gb = memory_limit_gb()
+    if limit_gb is not None:
+        ram_gb = min(ram_gb, limit_gb)
     machine_cores = os.cpu_count() or 1
 
     cores = config.cores or machine_cores
@@ -53,7 +69,7 @@ def create_spark(config: SparkConfig, resources: SparkResources) -> SparkSession
     spark.sparkContext.setLogLevel(config.log_level)
 
     logger.info(
-        "Spark %s: %s, driver memory %dg (машина: %d ядер, %.1f ГБ RAM)",
+        "Spark %s: %s, driver memory %dg (доступно: %d ядер, %.1f ГБ RAM)",
         spark.version,
         master,
         resources.driver_memory_gb,

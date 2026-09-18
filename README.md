@@ -186,3 +186,30 @@ docker compose run --rm app predict --output data/processed/predictions.parquet
 | `cluster_id` | номер кластера |
 
 В одном запуске у товара ровно один кластер: пара `run_id` + `code` не может повторяться.
+
+## Инструменты для демонстрации в Kubernetes
+
+**metrics-server** — источник цифр для `kubectl top` и графиков нагрузки. В Docker Desktop ему нужен флаг `--kubelet-insecure-tls`:
+
+```bash
+helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
+helm upgrade --install metrics-server metrics-server/metrics-server -n kube-system --set 'args={--kubelet-insecure-tls}'
+kubectl top pods -n mlops
+```
+
+**Kubernetes Dashboard** — веб-интерфейс кластера. Для входа создаётся учётная запись только для чтения
+(встроенная роль `view`: поды, Job'ы, логи — без права что-либо менять и без доступа к Secret'ам):
+
+```bash
+helm repo add kubernetes-dashboard https://kubernetes-retired.github.io/dashboard/
+helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard -n kubernetes-dashboard --create-namespace
+kubectl -n kubernetes-dashboard create serviceaccount dashboard-viewer
+kubectl create clusterrolebinding dashboard-viewer --clusterrole=view --serviceaccount=kubernetes-dashboard:dashboard-viewer
+kubectl -n kubernetes-dashboard port-forward svc/kubernetes-dashboard-kong-proxy 8443:443
+```
+
+Токен для входа на https://localhost:8443:
+
+```bash
+kubectl -n kubernetes-dashboard create token dashboard-viewer --duration=24h
+```

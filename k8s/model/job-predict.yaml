@@ -33,16 +33,13 @@ spec:
             # Лаба 7: модель ходит только в витрину, доступа к базе у неё больше нет
             - {name: DATAMART_URL, value: "http://datamart:8090"}
           resources:
-            requests: {cpu: 500m, memory: 1536Mi}
-            limits: {memory: 2Gi}   # driver 1g из конфига + память самого Python
+            requests: {cpu: 500m, memory: 1Gi}   # пик драйвера: train 804Mi, predict 365Mi
+            limits: {memory: 1536Mi}   # модель видит этот лимит и берёт драйверу 1g (40% лимита, но не меньше 1 ГБ)
           volumeMounts:
             - {name: spark-conf, mountPath: /opt/spark/conf}
-            - {name: config, mountPath: /app/src/config.json, subPath: config.json}
             - {name: work, mountPath: /app/work}
       volumes:
         - name: spark-conf
           configMap: {name: spark-defaults}
-        - name: config
-          configMap: {name: model-config}
         - name: work
           persistentVolumeClaim: {claimName: mlops-work}

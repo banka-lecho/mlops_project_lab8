@@ -59,7 +59,8 @@ object MartConfig {
     val ds = file.datasource
     MartConfig(
       server = file.server,
-      spark = file.spark,
+      // SPARK_MASTER=k8s://... — executor'ы в кластере; без переменной остаётся master из конфига (local[*])
+      spark = env.get("SPARK_MASTER").fold(file.spark)(master => file.spark.copy(master = master)),
       data = file.data,
       sampling = file.sampling,
       datasource = DatasourceConfig(

@@ -1,4 +1,2 @@
 pyspark==4.2.0
 numpy==2.5.3
-
-pytest==9.1.1

@@ -28,7 +28,8 @@ spec:
             - POST
             - http://datamart:8090/v1/preprocess
             - -d
-            - "{}"
+            # выборка из 100 тыс. строк на общем томе вместо полного CSV из конфига витрины
+            - '{"rawPath": "data/raw/products_100k.csv"}'
           resources:
             requests: {cpu: 50m, memory: 32Mi}
             limits: {memory: 64Mi}

@@ -2,7 +2,7 @@
   "spark": {
     "app_name": "openfoodfacts-kmeans",
     "ram_fraction": 0.4,
-    "driver_memory_min_gb": 2,
+    "driver_memory_min_gb": 1,
     "driver_memory_max_gb": 16,
     "cores": 0,
     "shuffle_partitions_per_core": 2,

@@ -43,13 +43,25 @@ spec:
             - name: POD_NAME
               valueFrom: {fieldRef: {fieldPath: metadata.name}}
             # Память JVM и адрес драйвера для executor'ов: витрина запускается без spark-submit,
-            # поэтому настройки драйвера передаются системными свойствами JVM
+            # поэтому настройки драйвера передаются системными свойствами JVM.
+            # Динамическое выделение: витрина работает постоянно, но считает редко — executor'ы
+            # поднимаются под запрос (до 2) и удаляются после минуты простоя, а не держат память круглосуточно.
+            # cachedExecutorIdleTimeout — предобработка кэширует данные и не освобождает кэш,
+            # без таймаута такие executor'ы не отпускались бы никогда.
             - name: JAVA_OPTS
               value: >-
                 -Xmx1g
                 -Dspark.driver.host=$(POD_IP)
                 -Dspark.kubernetes.driver.pod.name=$(POD_NAME)
-            - {name: DATAMART_CONFIG, value: /etc/datamart/config.json}
+                -Dspark.dynamicAllocation.enabled=true
+                -Dspark.dynamicAllocation.shuffleTracking.enabled=true
+                -Dspark.dynamicAllocation.minExecutors=0
+                -Dspark.dynamicAllocation.maxExecutors=2
+                -Dspark.dynamicAllocation.executorIdleTimeout=60s
+                -Dspark.dynamicAllocation.cachedExecutorIdleTimeout=120s
+                -Dspark.dynamicAllocation.shuffleTracking.timeout=120s
+            - name: SPARK_MASTER
+              value: k8s://https://kubernetes.default.svc:443
             - {name: SPARK_CONF_DIR, value: /opt/spark/conf}
             - {name: MSSQL_HOST, value: mssql}
             - name: MSSQL_USER
@@ -59,8 +71,8 @@ spec:
               valueFrom:
                 secretKeyRef: {name: mssql-credentials, key: MSSQL_PASSWORD}
           resources:
-            requests: {cpu: 500m, memory: 1536Mi}
-            limits: {memory: 2Gi}   # -Xmx1g + память самой JVM вне кучи
+            requests: {cpu: 250m, memory: 1Gi}   # пик 476m CPU / 759Mi памяти, в простое ~6m / 370Mi
+            limits: {memory: 1536Mi}             # -Xmx1g + память самой JVM вне кучи
           # Модель обращается к витрине только когда она отвечает на /health
           readinessProbe:
             httpGet: {path: /health, port: 8090}
@@ -70,12 +82,9 @@ spec:
             periodSeconds: 5
             failureThreshold: 36
           volumeMounts:
-            - {name: config, mountPath: /etc/datamart}
             - {name: spark-conf, mountPath: /opt/spark/conf}
             - {name: work, mountPath: /app/work}
       volumes:
-        - name: config
-          configMap: {name: datamart-config}
         - name: spark-conf
           configMap: {name: spark-defaults}
         - name: work

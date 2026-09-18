@@ -35,8 +35,8 @@ spec:
               valueFrom:
                 secretKeyRef: {name: mssql-credentials, key: MSSQL_SA_PASSWORD}
           resources:
-            requests: {cpu: 500m, memory: 2Gi}   
-            limits: {memory: 3Gi}
+            requests: {cpu: 250m, memory: 1536Mi}   # пик 60m CPU / 1352Mi памяти
+            limits: {memory: 2Gi}                  # минимум для MS SQL; сам сервер берёт 80% лимита (~1640 МБ)
           readinessProbe:
             tcpSocket: {port: 1433}
             periodSeconds: 5

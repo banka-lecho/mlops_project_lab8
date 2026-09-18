@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mssql
+  namespace: mlops
+spec:
+  selector: {app: mssql}
+  ports:
+    - {name: tds, port: 1433, targetPort: 1433}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mssql
+  namespace: mlops
+spec:
+  serviceName: mssql
+  replicas: 1
+  selector:
+    matchLabels: {app: mssql}
+  template:
+    metadata:
+      labels: {app: mssql}
+    spec:
+      containers:
+        - name: mssql
+          image: mcr.microsoft.com/mssql/server:2022-latest
+          imagePullPolicy: IfNotPresent  
+          ports:
+            - {name: tds, containerPort: 1433}
+          env:
+            - {name: ACCEPT_EULA, value: "Y"}
+            - {name: MSSQL_PID, value: Developer}
+            - name: MSSQL_SA_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: mssql-credentials, key: MSSQL_SA_PASSWORD}
+          resources:
+            requests: {cpu: 500m, memory: 2Gi}   
+            limits: {memory: 3Gi}
+          readinessProbe:
+            tcpSocket: {port: 1433}
+            periodSeconds: 5
+          startupProbe:                         
+            tcpSocket: {port: 1433}
+            periodSeconds: 10
+            failureThreshold: 30
+          volumeMounts:
+            - {name: data, mountPath: /var/opt/mssql}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests: {storage: 5Gi}

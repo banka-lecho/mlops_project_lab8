@@ -1,5 +1,3 @@
-# Модель лабы 5, шаг «preprocess» — предобработка: сырой CSV -> очистка -> выборка -> parquet.
-# Под Job — драйвер Spark, executor'ов он поднимает сам (настройки в spark-defaults).
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -12,19 +10,19 @@ spec:
     metadata:
       labels: {app: model, command: preprocess}
     spec:
-      serviceAccountName: spark   # права создавать поды executor'ов
+      serviceAccountName: spark   
+      enableServiceLinks: false
       restartPolicy: Never
       containers:
         - name: driver
-          image: mlops/model:lab5
+          image: mlops/model:lab6
           imagePullPolicy: IfNotPresent
-          args: ["python", "/app/src/preprocess.py"]
+          args: ["python", "/app/src/main.py", "preprocess"]
           env:
             - name: POD_IP
               valueFrom: {fieldRef: {fieldPath: status.podIP}}
             - name: POD_NAME
               valueFrom: {fieldRef: {fieldPath: metadata.name}}
-            # Без этой переменной модель работает в local mode, как в лабе 5
             - name: SPARK_MASTER
               value: k8s://https://kubernetes.default.svc:443
             - name: PYSPARK_SUBMIT_ARGS
@@ -32,9 +30,16 @@ spec:
                 --conf spark.driver.host=$(POD_IP)
                 --conf spark.kubernetes.driver.pod.name=$(POD_NAME)
                 pyspark-shell
+            - {name: MSSQL_HOST, value: mssql}
+            - name: MSSQL_USER
+              valueFrom:
+                secretKeyRef: {name: mssql-credentials, key: MSSQL_USER}
+            - name: MSSQL_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: mssql-credentials, key: MSSQL_PASSWORD}
           resources:
             requests: {cpu: 500m, memory: 1536Mi}
-            limits: {memory: 2Gi}   # driver 1g из конфига + память самого Python
+            limits: {memory: 2Gi}   
           volumeMounts:
             - {name: spark-conf, mountPath: /opt/spark/conf}
             - {name: config, mountPath: /app/src/config.json, subPath: config.json}

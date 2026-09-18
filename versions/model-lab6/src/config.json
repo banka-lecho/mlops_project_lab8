@@ -1,0 +1,62 @@
+{
+  "spark": {
+    "app_name": "openfoodfacts-kmeans",
+    "ram_fraction": 0.4,
+    "driver_memory_min_gb": 2,
+    "driver_memory_max_gb": 16,
+    "cores": 0,
+    "shuffle_partitions_per_core": 2,
+    "log_level": "WARN"
+  },
+  "data": {
+    "raw_path": "data/en.openfoodfacts.org.products.csv",
+    "interim_path": "data/interim/products.parquet",
+    "sample_path": "data/processed/sample.parquet",
+    "report_path": "reports/preprocess_report.json"
+  },
+  "features": {
+    "numeric": [
+      "energy-kcal_100g",
+      "fat_100g",
+      "saturated-fat_100g",
+      "carbohydrates_100g",
+      "sugars_100g",
+      "proteins_100g",
+      "salt_100g"
+    ],
+    "meta": [
+      "code",
+      "product_name",
+      "main_category_en",
+      "pnns_groups_1",
+      "nutriscore_grade"
+    ]
+  },
+  "cleaning": {
+    "energy_abs_tol_kcal": 50,
+    "energy_rel_tol": 0.3
+  },
+  "sampling": {
+    "seed": 42,
+    "rows_per_core": 50000,
+    "copies_in_memory": 3,
+    "memory_overhead": 4
+  },
+  "model": {
+    "model_path": "models/kmeans",
+    "scaler_path": "models/scaler",
+    "predictions_path": "data/processed/predictions.parquet",
+    "metrics_path": "reports/model_report.json",
+    "k_min": 2,
+    "k_max": 10
+  },
+  "datasource": {
+    "host": "localhost",
+    "port": "1433",
+    "database": "OpenFoodDB",
+    "raw_schema": "raw",
+    "ml_schema": "ml",
+    "num_partitions": "1",
+    "tables": ["processed_data", "model_runs", "predictions"]
+  }
+}

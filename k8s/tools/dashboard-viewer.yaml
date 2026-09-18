@@ -1,0 +1,21 @@
+# Учётная запись для входа в Kubernetes Dashboard.
+# Встроенная роль view: смотреть поды, Job'ы, логи и ConfigMap'ы во всём кластере, но ничего не менять
+# и не читать Secret'ы (у одногруппника здесь cluster-admin — полные права на кластер).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dashboard-viewer
+  namespace: kubernetes-dashboard
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dashboard-viewer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: dashboard-viewer
+    namespace: kubernetes-dashboard

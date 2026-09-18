@@ -1,0 +1,41 @@
+import argparse
+
+from model import ModelKMEANS
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Обучение и инференс KMeans на Open Food Facts"
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    subparsers.add_parser(
+        "train", help="Обучить модель и сохранить модель/скейлер/отчёт"
+    )
+
+    predict_parser = subparsers.add_parser(
+        "predict", help="Применить уже обученную модель"
+    )
+    predict_parser.add_argument(
+        "--output",
+        dest="predictions_path",
+        default=None,
+        help="Куда сохранить предсказания (по умолчанию — model.predictions_path из конфига)",
+    )
+
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    model = ModelKMEANS()
+
+    if args.command == "train":
+        model.train()
+    elif args.command == "predict":
+        predictions_path = args.predictions_path or model.config.model.predictions_path
+        model.predict(predictions_path)
+
+
+if __name__ == "__main__":
+    main()
